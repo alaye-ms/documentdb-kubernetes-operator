@@ -142,6 +142,16 @@ func (r *DocumentDBReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 		}
 	}
 
+	// TODO make this only run once
+	if currentCnpgCluster.Status.Phase == "Cluster in healthy state" && isPrimary {
+		grantCommand := "GRANT documentdb_admin_role TO streaming_replica;"
+
+		if err := r.executeSQLCommand(ctx, documentdb.Name, req.Namespace, self, grantCommand, "grant-permissions"); err != nil {
+			log.Error(err, "Failed to grant permissions to streaming_replica")
+			return ctrl.Result{RequeueAfter: RequeueAfterShort}, nil
+		}
+	}
+
 	return ctrl.Result{RequeueAfter: RequeueAfterLong}, nil
 }
 
@@ -225,4 +235,44 @@ func (r *DocumentDBReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&cnpgv1.Subscription{}).
 		Named("documentdb-controller").
 		Complete(r)
+}
+
+func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdbName, namespace, sqlCommand, uniqueName string) error {
+	zero := int32(0)
+	host := documentdbName + "-rw"
+	sqlPod := &batchv1.Job{
+		ObjectMeta: ctrl.ObjectMeta{
+			Name:      fmt.Sprintf("%s-%s-sql-executor", documentdbName, uniqueName),
+			Namespace: namespace,
+		},
+		Spec: batchv1.JobSpec{
+			Template: v1.PodTemplateSpec{
+				Spec: v1.PodSpec{
+					RestartPolicy: v1.RestartPolicyNever,
+					Containers: []v1.Container{
+						{
+							Name:  "sql-executor",
+							Image: "postgres:15",
+							Command: []string{
+								"psql",
+								"-h", host,
+								"-U", "postgres",
+								"-d", "postgres",
+								"-c", sqlCommand,
+							},
+						},
+					},
+				},
+			},
+			TTLSecondsAfterFinished: &zero,
+		},
+	}
+
+	if err := r.Client.Create(ctx, sqlPod); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+
+	return nil
 }

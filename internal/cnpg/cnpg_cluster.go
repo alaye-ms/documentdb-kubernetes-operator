@@ -65,6 +65,7 @@ func getInheritedMetadataLabels(documentdb dbpreview.DocumentDB) *cnpgv1.Embedde
 		Labels: map[string]string{
 			util.LABEL_APP:          documentdb.Name,
 			util.LABEL_REPLICA_TYPE: "primary", // TODO: Replace with CNPG default setup
+			util.LABEL_ROLE: "primary", // TODO: Replace with CNPG default setup
 		},
 	}
 }
