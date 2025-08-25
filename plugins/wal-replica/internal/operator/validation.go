@@ -10,8 +10,8 @@ import (
 	"github.com/cloudnative-pg/cnpg-i-machinery/pkg/pluginhelper/decoder"
 	"github.com/cloudnative-pg/cnpg-i/pkg/operator"
 
-	"github.com/documentdb/cnpg-i-sidecar-injector/internal/config"
-	"github.com/documentdb/cnpg-i-sidecar-injector/pkg/metadata"
+	"github.com/documentdb/cnpg-i-wal-replica/internal/config"
+	"github.com/documentdb/cnpg-i-wal-replica/pkg/metadata"
 )
 
 // ValidateClusterCreate validates a cluster that is being created,
@@ -32,7 +32,7 @@ func (Implementation) ValidateClusterCreate(
 		metadata.PluginName,
 	)
 
-	_, result.ValidationErrors = config.FromParameters(helper)
+	result.ValidationErrors = config.ValidateParams(helper)
 
 	return result, nil
 }
