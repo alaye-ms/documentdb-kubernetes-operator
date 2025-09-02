@@ -64,9 +64,8 @@ func (Implementation) ValidateClusterChange(
 		metadata.PluginName,
 	)
 
-	var newConfiguration *config.Configuration
-	newConfiguration, result.ValidationErrors = config.FromParameters(newClusterHelper)
-	oldConfiguration, _ := config.FromParameters(oldClusterHelper)
+	newConfiguration := config.FromParameters(newClusterHelper)
+	oldConfiguration := config.FromParameters(oldClusterHelper)
 	result.ValidationErrors = config.ValidateChanges(oldConfiguration, newConfiguration, newClusterHelper)
 
 	return result, nil

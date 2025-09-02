@@ -31,16 +31,13 @@ func (Implementation) MutateCluster(
 		metadata.PluginName,
 	)
 
-	config, valErrs := config.FromParameters(helper)
-	if len(valErrs) > 0 {
-		return nil, valErrs[0]
-	}
-
+	config := config.FromParameters(helper)
 	mutatedCluster := cluster.DeepCopy()
 	if helper.PluginIndex < 0 {
 		if mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters == nil {
 			mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters = make(map[string]string)
 		}
+		config.ApplyDefaults()
 
 		mutatedCluster.Spec.Plugins[helper.PluginIndex].Parameters, err = config.ToParameters()
 		if err != nil {

@@ -92,10 +92,7 @@ func (impl Implementation) reconcileCluster(
 	}
 
 	helper := common.NewPlugin(*cluster, metadata.PluginName)
-	configuration, valErrs := config.FromParameters(helper)
-	if len(valErrs) > 0 {
-		return nil, valErrs[0]
-	}
+	configuration := config.FromParameters(helper)
 
 	// Just log if disabled and return noop
 	if helper.PluginIndex < 0 {
@@ -124,7 +121,7 @@ func (impl Implementation) reconcileCluster(
 	cmd := []string{"/usr/bin/pg_receivewal", "--no-loop", "--directory", walDir, "--host", replHost, "--user", "streaming_replica"}
 
 	// Add synchronous flag if requested
-	if configuration.Synchronous {
+	if configuration.Synchronous == config.SynchronousActive {
 		cmd = append(cmd, "--synchronous")
 	}
 
@@ -150,13 +147,9 @@ func (impl Implementation) reconcileCluster(
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": depName}},
 					Spec: corev1.PodSpec{
 						Containers: []corev1.Container{{
-							Name:  "wal-receiver",
-							Image: configuration.Image,
-							Args:  cmd,
-							Env: []corev1.EnvVar{{
-								Name:      "PGPASSWORD",
-								ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{LocalObjectReference: corev1.LocalObjectReference{Name: configuration.ReplicationPasswordSecretName}, Key: configuration.ReplicationPasswordSecretKey}},
-							}},
+							Name:           "wal-receiver",
+							Image:          configuration.Image,
+							Args:           cmd,
 							Ports:          []corev1.ContainerPort{{Name: "metrics", ContainerPort: 9187}},
 							ReadinessProbe: &corev1.Probe{ProbeHandler: corev1.ProbeHandler{Exec: &corev1.ExecAction{Command: []string{"/bin/sh", "-c", "test -d " + walDir}}}, PeriodSeconds: 30},
 						}},
@@ -176,10 +169,10 @@ func (impl Implementation) reconcileCluster(
 	} else {
 		// patch spec if needed
 		updated := existing.DeepCopy()
-		if len(updated.Spec.Template.Spec.Containers) == 0 || !strings.EqualFold(updated.Spec.Template.Spec.Containers[0].Image, configuration.Image) || !equalStringSlices(updated.Spec.Template.Spec.Containers[0].Args, complete) {
+		if len(updated.Spec.Template.Spec.Containers) == 0 || !strings.EqualFold(updated.Spec.Template.Spec.Containers[0].Image, configuration.Image) || !equalStringSlices(updated.Spec.Template.Spec.Containers[0].Args, cmd) {
 			updated.Spec.Template.Spec.Containers = []corev1.Container{existing.Spec.Template.Spec.Containers[0]}
 			updated.Spec.Template.Spec.Containers[0].Image = configuration.Image
-			updated.Spec.Template.Spec.Containers[0].Args = complete
+			updated.Spec.Template.Spec.Containers[0].Args = cmd
 			if patchErr := cl.Update(ctx, updated); patchErr != nil {
 				logger.Error(patchErr, "updating wal receiver deployment")
 				return nil, patchErr
