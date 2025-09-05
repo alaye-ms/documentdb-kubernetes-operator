@@ -28,7 +28,8 @@ func NewCmd() *cobra.Command {
 
 	// If you want to provide your own logr.Logger here, inject it into a context.Context
 	// with logr.NewContext(ctx, logger) and pass it to cmd.SetContext(ctx)
-	log.SetLogger(zap.New(zap.UseDevMode(true)))
+	logger := zap.New(zap.UseDevMode(true))
+	log.SetLogger(logger)
 
 	// Additional custom behaviour can be added by wrapping cmd.PersistentPreRun or cmd.Run
 

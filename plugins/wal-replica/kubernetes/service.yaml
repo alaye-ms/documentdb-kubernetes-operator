@@ -5,8 +5,8 @@ metadata:
     app: wal-replica
     cnpg.io/pluginName: cnpg-i-wal-replica.documentdb.io
   annotations:
-    cnpg.io/pluginClientSecret: sidecarinjector-client-tls
-    cnpg.io/pluginServerSecret: sidecarinjector-server-tls
+    cnpg.io/pluginClientSecret: walreplica-client-tls
+    cnpg.io/pluginServerSecret: walreplica-server-tls
     cnpg.io/pluginPort: "9090"
   name: wal-replica
 spec:

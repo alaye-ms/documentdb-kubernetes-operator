@@ -45,7 +45,7 @@ func (impl Implementation) GetCapabilities(
 		LifecycleCapabilities: []*lifecycle.OperatorLifecycleCapabilities{
 			{
 				Group: "postgresql.cnpg.io", // group of Cluster CRD
-				Kind:  "Cluster",
+				Kind:  "Clusters",
 				OperationTypes: []*lifecycle.OperatorOperationType{{
 					Type: lifecycle.OperatorOperationType_TYPE_CREATE,
 				}, {
@@ -63,7 +63,9 @@ func (impl Implementation) LifecycleHook(
 	ctx context.Context,
 	request *lifecycle.OperatorLifecycleRequest,
 ) (*lifecycle.OperatorLifecycleResponse, error) {
+	logger := log.FromContext(ctx).WithName("LifecycleHook")
 	kind, err := utils.GetKind(request.GetObjectDefinition())
+	logger.Info("LifecycleHook called for " + kind)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +87,8 @@ func (impl Implementation) reconcileCluster(
 	request *lifecycle.OperatorLifecycleRequest,
 	operation lifecycle.OperatorOperationType_Type,
 ) (*lifecycle.OperatorLifecycleResponse, error) {
-	logger := log.FromContext(ctx).WithName("wal-replica-lifecycle")
+	logger := log.FromContext(ctx).WithName("reconcileCluster")
+	logger.Info("reconciling Cluster for wal-replica plugin", "operation", operation.String())
 	cluster, err := decoder.DecodeClusterLenient(request.GetObjectDefinition())
 	if err != nil {
 		return nil, err
@@ -96,7 +99,7 @@ func (impl Implementation) reconcileCluster(
 
 	// Just log if disabled and return noop
 	if helper.PluginIndex < 0 {
-		logger.Debug("wal replica plugin not present in spec.")
+		logger.Info("wal replica plugin not present in spec.")
 		return &lifecycle.OperatorLifecycleResponse{}, nil
 	}
 
@@ -129,8 +132,6 @@ func (impl Implementation) reconcileCluster(
 	existing := &appsv1.Deployment{}
 	err = cl.Get(ctx, types.NamespacedName{Name: depName, Namespace: namespace}, existing)
 	if err != nil {
-		// create new deployment
-		replicas := int32(1)
 		dep := &appsv1.Deployment{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      depName,
@@ -141,7 +142,6 @@ func (impl Implementation) reconcileCluster(
 				},
 			},
 			Spec: appsv1.DeploymentSpec{
-				Replicas: &replicas,
 				Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": depName}},
 				Template: corev1.PodTemplateSpec{
 					ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": depName}},
@@ -181,9 +181,6 @@ func (impl Implementation) reconcileCluster(
 		}
 	}
 
-	// Wait a tiny bit for status changes (non-blocking best-effort)
-	_ = ctx
-	_ = operation
 	return &lifecycle.OperatorLifecycleResponse{}, nil
 }
 

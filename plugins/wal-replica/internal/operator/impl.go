@@ -45,3 +45,8 @@ func (Implementation) GetCapabilities(
 		},
 	}, nil
 }
+
+func (Implementation) Deregister(context.Context, *operator.DeregisterRequest) 
+(*operator.DeregisterResponse, error) {
+	return &operator.DeregisterResponse{}, nil
+}

@@ -1,11 +1,11 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: sidecarinjector-client
+  name: walreplica-client
 spec:
-  secretName: sidecarinjector-client-tls
+  secretName: walreplica-client-tls
 
-  commonName: "sidecarinjector-client"
+  commonName: "walreplica-client"
   duration: 2160h # 90d
   renewBefore: 360h # 15d
 

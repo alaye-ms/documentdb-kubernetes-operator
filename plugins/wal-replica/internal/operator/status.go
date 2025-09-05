@@ -32,6 +32,10 @@ func (Implementation) SetStatusInCluster(
 	if err != nil {
 		return nil, err
 	}
+
+	// TODO remove
+	logger.Debug("Debug worked?")
+
 	plg := common.NewPlugin(*cluster, metadata.PluginName)
 
 	// Find the status for our plugin
@@ -57,14 +61,14 @@ func (Implementation) SetStatusInCluster(
 			return nil, err
 		}
 	}
+
 	if status.Enabled {
 		logger.Debug("plugin is enabled, no action taken")
 		return clusterstatus.NewSetStatusInClusterResponseBuilder().NoOpResponse(), nil
 	}
 
-	// If for any reason the status needs to be wiped out we can use the following:
-	// clusterstatus.NewSetClusterStatusResponseBuilder().SetEmptyStatusResponse()
-	logger.Info("setting enabled plugin status")
+	// TODO uncomment this line when the `enabled` field stops alternating constantly
+	//logger.Info("setting enabled plugin status")
 
 	return clusterstatus.NewSetStatusInClusterResponseBuilder().JSONStatusResponse(Status{Enabled: true})
 }
