@@ -34,14 +34,7 @@ func (Implementation) GetPluginCapabilities(
 			{
 				Type: &identity.PluginCapability_Service_{
 					Service: &identity.PluginCapability_Service{
-						Type: identity.PluginCapability_Service_TYPE_LIFECYCLE_SERVICE,
-					},
-				},
-			},
-			{
-				Type: &identity.PluginCapability_Service_{
-					Service: &identity.PluginCapability_Service{
-						Type: identity.PluginCapability_Service_TYPE_OPERATOR_SERVICE,
+						Type: identity.PluginCapability_Service_TYPE_RECONCILER_HOOKS,
 					},
 				},
 			},
