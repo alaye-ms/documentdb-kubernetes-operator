@@ -294,7 +294,6 @@ func Promote(ctx context.Context, cli client.Client,
 
 // executeSQLCommand creates a pod to execute SQL commands against the azure-cluster-rw service
 func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb *dbpreview.DocumentDB, namespace, self, sqlCommand, uniqueName string) error {
-	zero := int32(0)
 	host := self + "-rw"
 	sqlPod := &batchv1.Job{
 		ObjectMeta: ctrl.ObjectMeta{
@@ -304,7 +303,7 @@ func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb
 		Spec: batchv1.JobSpec{
 			Template: v1.PodTemplateSpec{
 				Spec: v1.PodSpec{
-					RestartPolicy: v1.RestartPolicyNever,
+					RestartPolicy: v1.RestartPolicyOnFailure,
 					Containers: []v1.Container{
 						{
 							Name:  "sql-executor",
@@ -320,7 +319,6 @@ func (r *DocumentDBReconciler) executeSQLCommand(ctx context.Context, documentdb
 					},
 				},
 			},
-			TTLSecondsAfterFinished: &zero,
 		},
 	}
 

@@ -31,8 +31,6 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 	replicationContext *util.ReplicationContext,
 	cnpgCluster *cnpgv1.Cluster,
 ) error {
-	isPrimary := documentdb.Spec.ClusterReplication.Primary == replicationContext.Self
-
 	if documentdb.Spec.ClusterReplication.EnableFleetForCrossCloud {
 		err := r.CreateServiceImportAndExport(ctx, replicationContext, documentdb)
 		if err != nil {
@@ -40,10 +38,24 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		}
 	}
 
+	if replicationContext.IsPrimary() {
+		// Create replication slots for all replica clusters in one command
+		var createSlotCommands string
+		for _, otherCluster := range replicationContext.Others {
+			createSlotCommands += fmt.Sprintf("SELECT * FROM pg_create_physical_replication_slot('%s');", otherCluster)
+		}
+		if createSlotCommands == "" {
+			return fmt.Errorf("primary cluster has no replica clusters to create replication slots for")
+		}
+		if err := r.executeSQLCommand(ctx, documentdb, documentdb.Namespace, replicationContext.Self, createSlotCommands, "create-slots"); err != nil {
+			return err
+		}
+	}
+
 	// No more errors possible, so we can safely edit the spec
 	cnpgCluster.Name = replicationContext.Self
 
-	if !isPrimary {
+	if !replicationContext.IsPrimary() {
 		cnpgCluster.Spec.InheritedMetadata.Labels[util.LABEL_REPLICATION_CLUSTER_TYPE] = "replica"
 		cnpgCluster.Spec.Bootstrap = &cnpgv1.BootstrapConfiguration{
 			PgBaseBackup: &cnpgv1.BootstrapPgBaseBackup{
@@ -52,6 +64,7 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 				Owner:    "postgres",
 			},
 		}
+		cnpgCluster.Spec.PostgresConfiguration.Parameters["primary_slot_name"] = replicationContext.Self
 	} else if documentdb.Spec.ClusterReplication.HighAvailability {
 		// If primary and HA we want a local standby and a slot for the WAL replica
 		cnpgCluster.Spec.Instances = 2
@@ -114,10 +127,11 @@ func (r *DocumentDBReconciler) AddClusterReplicationToClusterSpec(
 		{
 			Name: replicationContext.Self,
 			ConnectionParameters: map[string]string{
-				"host":   selfHost,
-				"port":   "5432",
-				"dbname": "postgres",
-				"user":   "postgres",
+				"host":        selfHost,
+				"port":        "5432",
+				"dbname":      "postgres",
+				"user":        "postgres",
+				"replication": "true",
 			},
 		},
 	}
