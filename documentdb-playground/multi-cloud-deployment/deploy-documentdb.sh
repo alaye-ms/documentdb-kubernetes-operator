@@ -23,7 +23,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RESOURCE_GROUP="${RESOURCE_GROUP:-german-aks-fleet-rg}"
 
 AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-aks-documentdb-cluster}"
-GKE_CLUSTER_NAME="${GKE_CLUSTER_NAME:-gke-documentdb-cluster}"
+AKS2_CLUSTER_NAME="${AKS2_CLUSTER_NAME:-aks2-documentdb-cluster}"
 EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-eks-documentdb-cluster}"
 
 # Azure DNS configuration
@@ -47,8 +47,8 @@ fi
 export DOCUMENTDB_PASSWORD
 
 
-# Convert to array and add GCP
-CLUSTER_ARRAY=("$EKS_CLUSTER_NAME" "$AKS_CLUSTER_NAME" "$GKE_CLUSTER_NAME")
+# Convert to array
+CLUSTER_ARRAY=("$EKS_CLUSTER_NAME" "$AKS_CLUSTER_NAME" "$AKS2_CLUSTER_NAME")
 echo "Found ${#CLUSTER_ARRAY[@]} member clusters:"
 for cluster in "${CLUSTER_ARRAY[@]}"; do
   echo "  - $cluster"
@@ -62,8 +62,8 @@ echo "Selected primary cluster: $PRIMARY_CLUSTER"
 CLUSTER_LIST=$(cat <<EOF
       - name: ${AKS_CLUSTER_NAME}
         environment: aks
-      - name: ${GKE_CLUSTER_NAME}
-        environment: gke
+      - name: ${AKS2_CLUSTER_NAME}
+        environment: aks
       - name: ${EKS_CLUSTER_NAME}
         environment: eks
         storageClass: documentdb-storage

@@ -1,20 +1,19 @@
 # Multi-Cloud DocumentDB Deployment
 
-This directory contains templates and scripts for deploying DocumentDB across multiple cloud providers (Azure AKS, Google GKE, and AWS EKS) with cross-cloud replication using Istio service mesh and AKS Fleet for resource propagation.
+This directory contains templates and scripts for deploying DocumentDB across multiple cloud providers (two Azure AKS clusters and AWS EKS) with cross-cloud replication using Istio service mesh and AKS Fleet for resource propagation.
 
 ## Architecture
 
 - **Fleet Hub**: Deployed in East US 2 (for resource propagation)
-- **Multi-Cloud Clusters**: 
-  - **AKS**: Single member cluster in eastus2
-  - **GKE**: Cluster in us-central1-a
+- **Clusters**: 
+  - **AKS**: Primary member cluster in eastus2
+  - **AKS2**: Second member cluster in westus2
   - **EKS**: Cluster in us-west-2
 - **Network**: 
-  - AKS: Uses default Azure CNI
-  - GKE: Default GKE networking
+  - AKS/AKS2: Uses default Azure CNI
   - EKS: Default EKS networking with internet-facing NLB for cross-cloud connectivity
 - **Service Mesh**: Istio multi-cluster mesh for cross-cloud service discovery
-- **VM Size**: Standard_DS3_v2 for AKS, e2-standard-4 for GKE, m5.large for EKS (configurable)
+- **VM Size**: Standard_DS3_v2 for AKS clusters, m5.large for EKS (configurable)
 - **Node Count**: 1 nodes per cluster for cost optimization
 - **Kubernetes Version**: Uses region default GA version (configurable)
 - **DocumentDB**: Multi-cloud deployment with primary/replica architecture and Istio-based replication
@@ -22,8 +21,6 @@ This directory contains templates and scripts for deploying DocumentDB across mu
 ## Prerequisites
 
 - **Azure**: Azure CLI installed and logged in (`az login`)
-- **GCP**: Google Cloud SDK installed and logged in (`gcloud auth login`)
-  - gke-gcloud-auth-plugin: `sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin`
 - **AWS**: AWS CLI installed and configured (`aws configure`)
   - eksctl installed for EKS cluster management
 - **Kubernetes Tools**:
@@ -35,7 +32,6 @@ This directory contains templates and scripts for deploying DocumentDB across mu
   - openssl for password generation
 - **Permissions**:
   - Azure: Contributor access to the subscription
-  - GCP: Container Admin, Compute Network Admin, and Service Account User roles
   - AWS: Sufficient IAM permissions to create EKS clusters and IAM roles
 - **Quotas**: Sufficient quota in target regions for clusters
 
@@ -51,11 +47,10 @@ This single script will:
 1. **Deploy Infrastructure**:
    - Create Azure resource group
    - Deploy AKS Fleet resource
-   - Deploy AKS member cluster
-   - Deploy GKE cluster 
+   - Deploy two AKS member clusters (in different regions)
    - Deploy EKS cluster with EBS CSI driver and AWS Load Balancer Controller
 2. **Configure Multi-Cloud Mesh**:
-   - Join GKE and EKS clusters to the AKS Fleet
+   - Join EKS cluster to the AKS Fleet
    - Install cert-manager on all clusters
    - Set up Istio multi-cluster service mesh with shared root CA
    - Configure cross-cloud networking with east-west gateways
@@ -93,18 +88,10 @@ This will:
 
 ### Infrastructure Configuration
 
-Edit `parameters.bicepparam` to customize AKS deployment:
-- Hub cluster name (used for fleet naming)
-- Hub region (fleet location)
-- Member cluster name and region
-- VM sizes
-- Node counts
-- Kubernetes version
-
-Or use environment variables for all clouds:
+Use environment variables to customize deployments:
 
 ```bash
-# Azure AKS
+# Azure AKS (primary member)
 export RESOURCE_GROUP="my-multi-cloud-rg"
 export RG_LOCATION="eastus2"
 export HUB_REGION="eastus2"
@@ -112,11 +99,9 @@ export AKS_CLUSTER_NAME="aks-documentdb-cluster"
 export AKS_REGION="eastus2"
 export HUB_VM_SIZE="Standard_D4s_v3"
 
-# Google GKE
-export PROJECT_ID="my-gcp-project-id"
-export GCP_USER="user@example.com"
-export ZONE="us-central1-a"
-export GKE_CLUSTER_NAME="gke-documentdb-cluster"
+# Azure AKS (second member)
+export AKS2_CLUSTER_NAME="aks2-documentdb-cluster"
+export AKS2_REGION="westus2"
 
 # AWS EKS
 export EKS_CLUSTER_NAME="eks-documentdb-cluster"
@@ -159,7 +144,7 @@ export AZURE_DNS_PARENT_ZONE_RESOURCE_ID="/subscriptions/.../dnszones/parent.zon
 After deployment, contexts are automatically configured for:
 - `hub`: AKS Fleet hub cluster
 - `aks-documentdb-cluster`: AKS member cluster (default name)
-- `gke-documentdb-cluster`: GKE cluster (default name)
+- `aks2-documentdb-cluster`: Second AKS member cluster (default name)
 - `eks-documentdb-cluster`: EKS cluster (default name)
 
 ## Management
@@ -228,7 +213,7 @@ az fleet show --name <fleet-name> --resource-group $RESOURCE_GROUP
 # List fleet members (includes Azure members only, not cross-cloud)
 az fleet member list --fleet-name <fleet-name> --resource-group $RESOURCE_GROUP
 
-# Check multi-cloud fleet membership (GKE and EKS)
+# Check multi-cloud fleet membership (EKS)
 kubectl --context hub get membercluster
 ```
 
@@ -238,14 +223,14 @@ kubectl --context hub get membercluster
 
 ```bash
 # Check Istio components on each cluster
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get pods -n istio-system
   echo
 done
 
 # Verify east-west gateway services
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get svc -n istio-system istio-eastwestgateway
   echo
@@ -257,11 +242,11 @@ done
 ```bash
 # Check remote secrets (for service discovery)
 kubectl --context aks-documentdb-cluster get secrets -n istio-system | grep "istio-remote-secret"
-kubectl --context gke-documentdb-cluster get secrets -n istio-system | grep "istio-remote-secret"
+kubectl --context aks2-documentdb-cluster get secrets -n istio-system | grep "istio-remote-secret"
 kubectl --context eks-documentdb-cluster get secrets -n istio-system | grep "istio-remote-secret"
 
 # Verify mesh network configuration
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get namespace istio-system --show-labels
   echo
@@ -274,14 +259,14 @@ done
 
 ```bash
 # Quick status across all clusters
-for c in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do 
+for c in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do 
   echo "=== $c ==="
   kubectl --context $c get documentdb,pods -n documentdb-preview-ns 2>/dev/null || echo 'Not deployed yet'
   echo
 done
 
 # Check operator status on all clusters
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get deploy -n documentdb-operator
   kubectl --context $cluster get pods -n documentdb-operator
@@ -292,14 +277,14 @@ done
 
 ```bash
 # Monitor all DocumentDB instances
-watch 'for c in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do \
+watch 'for c in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do \
   echo "=== $c ==="; \
   kubectl --context $c get documentdb,pods -n documentdb-preview-ns; \
   echo; \
 done'
 
 # Check DocumentDB service endpoints
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get svc -n documentdb-preview-ns
   echo
@@ -310,14 +295,14 @@ done
 
 ```bash
 # Check WAL replica status in Istio mesh
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get pods -n documentdb-preview-ns -l component=wal-replica
   echo
 done
 
 # Verify Istio sidecar injection
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster get pods -n documentdb-preview-ns -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.spec.containers[*].name}{"\n"}{end}'
   echo
@@ -340,7 +325,7 @@ az network dns record-set srv show \
   --resource-group $RESOURCE_GROUP
 
 # Show A/CNAME records for each cluster
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   az network dns record-set a show --name $cluster --zone-name <zone-name> --resource-group $RESOURCE_GROUP 2>/dev/null || \
   az network dns record-set cname show --name $cluster --zone-name <zone-name> --resource-group $RESOURCE_GROUP 2>/dev/null || \
@@ -362,7 +347,7 @@ az role assignment create --role "Azure Kubernetes Fleet Manager RBAC Cluster Ad
   --assignee <user-id> --scope $FLEET_ID
 ```
 
-For GCP and AWS, ensure you have appropriate IAM permissions configured via `gcloud` and `aws` CLI.
+For AWS, ensure you have appropriate IAM permissions configured via the `aws` CLI.
 
 ## Troubleshooting
 
@@ -375,16 +360,6 @@ az fleet get-credentials --resource-group $RESOURCE_GROUP --name <fleet-name>
 
 # If web authentication is blocked, use Azure CLI
 kubelogin convert-kubeconfig -l azurecli
-```
-
-**Google GKE:**
-```bash
-# Refresh credentials
-gcloud container clusters get-credentials <cluster-name> --zone <zone>
-
-# Verify authentication
-gcloud auth list
-gcloud config get-value account
 ```
 
 **AWS EKS:**
@@ -458,7 +433,7 @@ kubectl --context aks-documentdb-cluster run test-pod --image=nicolaka/netshoot 
 
 # From within the pod, test connectivity to other clusters
 # Using Istio service discovery
-curl -v http://documentdb-service-gke-documentdb-cluster.documentdb-preview-ns.svc.cluster.local:10260
+curl -v http://documentdb-service-aks2-documentdb-cluster.documentdb-preview-ns.svc.cluster.local:10260
 curl -v http://documentdb-service-eks-documentdb-cluster.documentdb-preview-ns.svc.cluster.local:10260
 ```
 
@@ -466,7 +441,7 @@ curl -v http://documentdb-service-eks-documentdb-cluster.documentdb-preview-ns.s
 
 ```bash
 # Check operator logs on member clusters
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   echo "=== $cluster ==="
   kubectl --context $cluster logs -n documentdb-operator deployment/documentdb-operator --tail=50
   echo
@@ -487,21 +462,15 @@ kubectl --context hub delete clusterresourceplacement documentdb-crp
 kubectl --context hub delete namespace documentdb-preview-ns
 
 # Wait for namespace deletion to complete on all clusters
-for cluster in aks-documentdb-cluster gke-documentdb-cluster eks-documentdb-cluster; do
+for cluster in aks-documentdb-cluster aks2-documentdb-cluster eks-documentdb-cluster; do
   kubectl --context $cluster wait --for=delete namespace/documentdb-preview-ns --timeout=60s || true
 done
 
 # Delete base operator resources
 kubectl --context hub delete clusterresourceplacement documentdb-base
 
-# Delete entire Azure resource group (includes AKS fleet and member)
+# Delete entire Azure resource group (includes AKS fleet and both AKS members)
 az group delete --name $RESOURCE_GROUP --yes --no-wait
-
-# Delete GKE cluster
-gcloud container clusters delete $GKE_CLUSTER_NAME \
-  --zone $ZONE \
-  --project $PROJECT_ID \
-  --quiet
 
 # Delete EKS cluster (also deletes associated IAM roles and service accounts)
 eksctl delete cluster --name $EKS_CLUSTER_NAME --region $EKS_REGION
@@ -515,22 +484,21 @@ az network dns zone delete \
 # Clean up local kubectl contexts
 kubectl config delete-context hub
 kubectl config delete-context aks-documentdb-cluster
-kubectl config delete-context gke-documentdb-cluster
+kubectl config delete-context aks2-documentdb-cluster
 kubectl config delete-context eks-documentdb-cluster
 ```
 
 ## Scripts
 
-- **`deploy.sh`**: All-in-one multi-cloud deployment (AKS Fleet + GKE + EKS + cert-manager + Istio mesh + operator)
-- **`deploy-documentdb.sh`**: Deploy multi-cloud DocumentDB with Istio-based replication and optional Azure DNS
-- **`main.bicep`**: Bicep template for AKS Fleet and single member cluster
-- **`parameters.bicepparam`**: Configuration parameters for AKS deployment
+- **`deploy.sh`**: All-in-one deployment (AKS Fleet + two AKS members + EKS + cert-manager + Istio mesh + operator)
+- **`deploy-documentdb.sh`**: Deploy DocumentDB with Istio-based replication and optional Azure DNS
+- **`main.bicep`**: Bicep template for AKS Fleet and two member clusters
 - **`documentdb-base.yaml`**: Fleet ClusterResourcePlacement for base resources (CRDs, RBAC, namespaces)
 - **`documentdb-cluster.yaml`**: DocumentDB multi-cloud configuration template with Fleet ClusterResourcePlacement
 
 ## Key Features
 
-- **Multi-Cloud Architecture**: Deploy across Azure AKS, Google GKE, and AWS EKS
+- **Multi-Cloud Architecture**: Deploy across two Azure AKS clusters and AWS EKS
 - **Istio Service Mesh**: Cross-cloud service discovery and secure communication
 - **Automated Mesh Setup**: Shared root CA, east-west gateways, and remote secrets
 - **AKS Fleet Integration**: Resource propagation via ClusterResourcePlacement to all clouds
@@ -539,9 +507,8 @@ kubectl config delete-context eks-documentdb-cluster
 - **Azure DNS Integration**: Optional DNS zone creation with A/CNAME and SRV records for MongoDB
 - **Cloud-Specific Configuration**: 
   - EKS: EBS CSI driver and AWS Load Balancer Controller
-  - GKE: Default persistent disk provisioner
-  - AKS: Azure Disk CSI driver
-- **Parallel Deployment**: AKS, GKE, and EKS deployed concurrently for faster setup
+  - AKS/AKS2: Azure Disk CSI driver
+- **Parallel Deployment**: AKS and EKS deployed concurrently for faster setup
 - **Smart Defaults**: Sensible defaults with environment variable overrides
 
 ## Additional Resources
@@ -551,7 +518,6 @@ kubectl config delete-context eks-documentdb-cluster
 - [Fleet ClusterResourcePlacement API](https://learn.microsoft.com/en-us/azure/kubernetes-fleet/concepts-resource-propagation)
 - [Istio Multi-Cluster Installation](https://istio.io/latest/docs/setup/install/multicluster/)
 - [Istio Multi-Primary Multi-Network](https://istio.io/latest/docs/setup/install/multicluster/multi-primary_multi-network/)
-- [Google GKE Documentation](https://cloud.google.com/kubernetes-engine/docs)
 - [AWS EKS Documentation](https://docs.aws.amazon.com/eks/)
 - [AWS Load Balancer Controller](https://kubernetes-sigs.github.io/aws-load-balancer-controller/)
 - [eksctl Documentation](https://eksctl.io/)

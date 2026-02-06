@@ -18,12 +18,9 @@ VALUES_FILE="${VALUES_FILE:-}"
 ISTIO_DIR="${ISTIO_DIR:-}"
 AKS_CLUSTER_NAME="${AKS_CLUSTER_NAME:-aks-documentdb-cluster}"
 AKS_REGION="${AKS_REGION:-eastus2}"
+AKS2_CLUSTER_NAME="${AKS2_CLUSTER_NAME:-aks2-documentdb-cluster}"
+AKS2_REGION="${AKS2_REGION:-westus2}"
 HUB_CONTEXT="${HUB_CONTEXT:-hub}"
-
-PROJECT_ID="${PROJECT_ID:-sanguine-office-475117-s6}"
-GCP_USER="${GCP_USER:-alexanderlaye59@gmail.com}"
-ZONE="${ZONE:-us-central1-a}"
-GKE_CLUSTER_NAME="${GKE_CLUSTER_NAME:-gke-documentdb-cluster}"
 
 EKS_CLUSTER_NAME="${EKS_CLUSTER_NAME:-eks-documentdb-cluster}"
 EKS_REGION="${EKS_REGION:-us-west-2}"
@@ -55,12 +52,6 @@ check_prerequisites() {
     exit 1
   fi
 
-  # Check gcloud CLI
-  if ! command -v gcloud &> /dev/null; then
-    echo "ERROR: gcloud CLI not found. Please install Google Cloud SDK first." >&2
-    exit 1
-  fi
-
   # Check AWS CLI
   if ! command -v aws &> /dev/null; then
     echo "ERROR: AWS CLI not found. Please install AWS CLI first." >&2
@@ -82,13 +73,6 @@ check_prerequisites() {
   # Check Azure login
   if ! az account show &> /dev/null; then
     echo "ERROR: Not logged into Azure. Please run 'az login' first." >&2
-    exit 1
-  fi
-
-  # Check gcloud login
-  gcloud config set account $GCP_USER
-  if ! gcloud auth list --filter=status:ACTIVE --format="value(account)" 2>/dev/null | grep -q .; then
-    echo "ERROR: Not logged into Google Cloud. Please run 'gcloud auth login' first." >&2
     exit 1
   fi
 
@@ -140,10 +124,11 @@ aks_fleet_deploy() {
   fi
 
   PARAMS=(
-    --parameters "$TEMPLATE_DIR/parameters.bicepparam"
     --parameters hubRegion="$HUB_REGION"
     --parameters memberRegion="$AKS_REGION"
     --parameters memberName="$AKS_CLUSTER_NAME"
+    --parameters member2Region="$AKS2_REGION"
+    --parameters member2Name="$AKS2_CLUSTER_NAME"
   )
 
   if [ -n "$HUB_VM_SIZE" ]; then
@@ -167,6 +152,7 @@ aks_fleet_deploy() {
   FLEET_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.fleetName.value')
   FLEET_ID_FROM_OUTPUT=$(echo $DEPLOYMENT_OUTPUT | jq -r '.fleetId.value')
   AKS_CLUSTER_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.memberClusterName.value')
+  AKS2_CLUSTER_NAME=$(echo $DEPLOYMENT_OUTPUT | jq -r '.member2ClusterName.value')
 
   SUBSCRIPTION_ID=$(az account show --query id -o tsv)
   export FLEET_ID="/subscriptions/${SUBSCRIPTION_ID}/resourceGroups/${RESOURCE_GROUP}/providers/Microsoft.ContainerService/fleets/${FLEET_NAME}"
@@ -183,56 +169,11 @@ aks_fleet_deploy() {
   az fleet get-credentials --resource-group "$RESOURCE_GROUP" --name "$FLEET_NAME" --overwrite-existing
 
   az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$AKS_CLUSTER_NAME" --overwrite-existing 
+  az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$AKS2_CLUSTER_NAME" --overwrite-existing 
 }
 
 # ============================================================================
-# Step 1.2: Deploy GKE Infrastructure
-# ============================================================================
-
-# TODO move this to a check at the top
-# sudo apt-get install google-cloud-cli-gke-gcloud-auth-plugin
-
-# Create project if it doesn't exist
-gke_deploy() {
-  if ! gcloud projects describe $PROJECT_ID &>/dev/null; then
-    gcloud projects create $PROJECT_ID
-  fi
-
-  gcloud config set project $PROJECT_ID
-
-  gcloud services enable container.googleapis.com
-  gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$GCP_USER" --role="roles/container.admin"
-  gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$GCP_USER" --role="roles/compute.networkAdmin"
-  gcloud projects add-iam-policy-binding $PROJECT_ID --member="user:$GCP_USER" --role="roles/iam.serviceAccountUser"
-
-  # Delete cluster if it exists
-  if gcloud container clusters describe "$GKE_CLUSTER_NAME" --zone "$ZONE" --project $PROJECT_ID &>/dev/null; then
-    gcloud container clusters delete "$GKE_CLUSTER_NAME" \
-      --zone "$ZONE" \
-      --project $PROJECT_ID  \
-      --quiet
-  fi
-
-  gcloud container clusters create "$GKE_CLUSTER_NAME" \
-    --zone "$ZONE" \
-    --num-nodes "2" \
-    --machine-type "e2-standard-4" \
-    --enable-ip-access \
-    --project $PROJECT_ID
-
-  kubectl config delete-context "$GKE_CLUSTER_NAME" || true
-  kubectl config delete-cluster "$GKE_CLUSTER_NAME" || true
-  kubectl config delete-user "$GKE_CLUSTER_NAME" || true
-  gcloud container clusters get-credentials "$GKE_CLUSTER_NAME" \
-      --location="$ZONE"
-  fullName="gke_${PROJECT_ID}_${ZONE}_${GKE_CLUSTER_NAME}"
-  # Replace all occurrences of the generated name with GKE_CLUSTER_NAME in kubeconfig
-  sed -i "s|$fullName|$GKE_CLUSTER_NAME|g" ~/.kube/config
-}
-
-
-# ============================================================================
-# Step 1.3: Deploy EKS Infrastructure
+# Step 1.2: Deploy EKS Infrastructure
 # ============================================================================
 
 eks_deploy() {
@@ -412,18 +353,15 @@ EOF
 check_prerequisites
 aks_fleet_deploy &
 aks_pid=$!
-gke_deploy &
-gke_pid=$!
 eks_deploy
 wait $aks_pid
-wait $gke_pid
 
-MEMBER_CLUSTER_NAMES=("$AKS_CLUSTER_NAME" "$GKE_CLUSTER_NAME" "$EKS_CLUSTER_NAME")
+MEMBER_CLUSTER_NAMES=("$AKS_CLUSTER_NAME" "$AKS2_CLUSTER_NAME" "$EKS_CLUSTER_NAME")
 
 echo "✅ Fleet infrastructure deployed successfully"
 echo "Member Clusters:"
 echo "$AKS_CLUSTER_NAME"
-echo "$GKE_CLUSTER_NAME"
+echo "$AKS2_CLUSTER_NAME"
 echo "$EKS_CLUSTER_NAME"
 
 # ============================================================================
@@ -437,22 +375,19 @@ git clone https://github.com/kubefleet-dev/kubefleet.git
 git clone https://github.com/Azure/fleet-networking.git
 pushd $temp_dir/kubefleet
 chmod +x hack/membership/joinMC.sh
-hack/membership/joinMC.sh "v0.16.5" "$HUB_CONTEXT" "$GKE_CLUSTER_NAME" "$EKS_CLUSTER_NAME"
+hack/membership/joinMC.sh "v0.16.5" "$HUB_CONTEXT" "$EKS_CLUSTER_NAME"
 popd
 
-# TODO clean this up a bit
-echo "Waiting for $GKE_CLUSTER_NAME to join fleet..."
-kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.resourceUsage.observationTime}' membercluster/$GKE_CLUSTER_NAME
 echo "Waiting for $EKS_CLUSTER_NAME to join fleet..."
 kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.resourceUsage.observationTime}' membercluster/$EKS_CLUSTER_NAME
 
 pushd $temp_dir/fleet-networking
 chmod +x hack/membership/joinMC.sh 
-hack/membership/joinMC.sh "v0.16.5" "v0.3.24" $HUB_CONTEXT $GKE_CLUSTER_NAME $EKS_CLUSTER_NAME
+hack/membership/joinMC.sh "v0.16.5" "v0.3.24" $HUB_CONTEXT $EKS_CLUSTER_NAME
 popd
 
 # TODO fix this
-# kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.agentStatus[?(@.conditions[?(@.reason=="AgentJoined" && @.status=="True")])].type}' membercluster/$GKE_CLUSTER_NAME
+# kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.agentStatus[?(@.conditions[?(@.reason=="AgentJoined" && @.status=="True")])].type}' membercluster/$EKS_CLUSTER_NAME
 
 popd
 
