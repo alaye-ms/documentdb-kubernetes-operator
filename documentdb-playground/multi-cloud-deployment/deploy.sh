@@ -351,10 +351,10 @@ EOF
 # Step 2: Collect Names
 # ============================================================================
 check_prerequisites
-aks_fleet_deploy &
-aks_pid=$!
-eks_deploy
-wait $aks_pid
+#aks_fleet_deploy &
+#aks_pid=$!
+#eks_deploy
+#wait $aks_pid
 
 MEMBER_CLUSTER_NAMES=("$AKS_CLUSTER_NAME" "$AKS2_CLUSTER_NAME" "$EKS_CLUSTER_NAME")
 
@@ -375,7 +375,8 @@ git clone https://github.com/kubefleet-dev/kubefleet.git
 git clone https://github.com/Azure/fleet-networking.git
 pushd $temp_dir/kubefleet
 chmod +x hack/membership/joinMC.sh
-hack/membership/joinMC.sh "v0.16.5" "$HUB_CONTEXT" "$EKS_CLUSTER_NAME"
+TAG="$(curl "https://api.github.com/repos/Azure/fleet/tags" | jq -r '.[0].name')"
+hack/membership/joinMC.sh "$TAG" "$HUB_CONTEXT" "$EKS_CLUSTER_NAME"
 popd
 
 echo "Waiting for $EKS_CLUSTER_NAME to join fleet..."
@@ -383,7 +384,8 @@ kubectl --context $HUB_CONTEXT wait --for=jsonpath='{.status.resourceUsage.obser
 
 pushd $temp_dir/fleet-networking
 chmod +x hack/membership/joinMC.sh 
-hack/membership/joinMC.sh "v0.16.5" "v0.3.24" $HUB_CONTEXT $EKS_CLUSTER_NAME
+NETWORK_TAG="$(curl "https://api.github.com/repos/Azure/fleet-networking/tags" | jq -r '.[0].name')"
+hack/membership/joinMC.sh "$TAG" "$NETWORK_TAG" $HUB_CONTEXT $EKS_CLUSTER_NAME
 popd
 
 # TODO fix this
