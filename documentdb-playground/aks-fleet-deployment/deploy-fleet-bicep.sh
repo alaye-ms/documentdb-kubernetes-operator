@@ -15,6 +15,13 @@ SCRIPT_DIR="$(dirname "$0")"
 KUBE_VM_SIZE="${KUBE_VM_SIZE:-}"
 # Optional: override the default member regions defined in main.bicep (comma-separated list)
 MEMBER_REGIONS="${MEMBER_REGIONS:-}"
+# Optionally tag all Azure public IPs created for LoadBalancer Services.
+TAG_ALL_LOADBALANCERS="${TAG_ALL_LOADBALANCERS:-false}"
+
+if [[ "$TAG_ALL_LOADBALANCERS" != "true" && "$TAG_ALL_LOADBALANCERS" != "false" ]]; then
+  echo "TAG_ALL_LOADBALANCERS must be either 'true' or 'false'" >&2
+  exit 1
+fi
 
 # Wait for any in-progress AKS operations in this resource group to finish
 wait_for_no_inprogress() {
@@ -54,6 +61,8 @@ fi
 
 PARAMS=()
 # Build parameter overrides
+PARAMS+=( --parameters tagAllLoadBalancers="$TAG_ALL_LOADBALANCERS" )
+
 if [ -n "$KUBE_VM_SIZE" ]; then
   echo "Overriding kubernetes VM size with: $KUBE_VM_SIZE"
   PARAMS+=( --parameters vmSize="$KUBE_VM_SIZE" )
@@ -108,6 +117,66 @@ while read -r cluster; do
   az aks get-credentials --resource-group "$RESOURCE_GROUP" --name "$cluster" --overwrite-existing
   if [[ "$cluster" == *"$HUB_REGION"* ]]; then HUB_CLUSTER="$cluster"; fi
 done <<< "$MEMBER_CLUSTER_NAMES"
+
+if [[ "$TAG_ALL_LOADBALANCERS" == "true" ]]; then
+  # AKS creates Azure public IPs from LoadBalancer Services, so mutate each
+  # public Service before provisioning and backfill any existing Services.
+  helm repo add kyverno https://kyverno.github.io/kyverno/ --force-update
+  helm repo update kyverno
+
+  while read -r cluster; do
+    [ -z "$cluster" ] && continue
+    echo "Configuring automatic Azure public IP tags on $cluster..."
+    helm upgrade --install kyverno kyverno/kyverno \
+      --kube-context "$cluster" \
+      --namespace kyverno \
+      --create-namespace \
+      --wait \
+      --timeout 5m
+
+    kubectl --context "$cluster" apply -f - <<'EOF'
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: add-azure-public-ip-tags
+spec:
+  rules:
+    - name: add-azure-public-ip-tags
+      match:
+        any:
+          - resources:
+              kinds:
+                - Service
+      preconditions:
+        all:
+          - key: "{{ request.object.spec.type || '' }}"
+            operator: Equals
+            value: LoadBalancer
+          - key: "{{ request.object.metadata.annotations.\"service.beta.kubernetes.io/azure-load-balancer-internal\" || 'false' }}"
+            operator: NotEquals
+            value: "true"
+      mutate:
+        patchStrategicMerge:
+          metadata:
+            annotations:
+              +(service.beta.kubernetes.io/azure-pip-ip-tags): FirstPartyUsage=/Unprivileged
+EOF
+
+    while IFS=$'\t' read -r namespace service; do
+      [ -z "$namespace" ] && continue
+      kubectl --context "$cluster" annotate service "$service" \
+        --namespace "$namespace" \
+        service.beta.kubernetes.io/azure-pip-ip-tags='FirstPartyUsage=/Unprivileged' \
+        --overwrite
+    done < <(kubectl --context "$cluster" get services --all-namespaces -o json | jq -r '
+      .items[]
+      | select(.spec.type == "LoadBalancer")
+      | select((.metadata.annotations["service.beta.kubernetes.io/azure-load-balancer-internal"] // "false") != "true")
+      | [.metadata.namespace, .metadata.name]
+      | @tsv
+    ')
+  done <<< "$MEMBER_CLUSTER_NAMES"
+fi
 
 ######### KUBEFLEET SETUP #########
 

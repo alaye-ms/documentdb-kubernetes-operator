@@ -1,42 +1,55 @@
 #!/bin/bash
-# Install cert-manager on all member clusters in the fleet
+# Install cert-manager independently on all member clusters in the fleet.
+# Certificate controllers and their generated runtime resources must remain
+# cluster-local; propagating the namespace with Fleet causes ownership conflicts.
 
 set -euo pipefail
 
 RESOURCE_GROUP="${RESOURCE_GROUP:-documentdb-aks-fleet-rg}"
-HUB_REGION="${HUB_REGION:-westus3}"
 MEMBERS=$(az aks list -g "$RESOURCE_GROUP" -o json | jq -r '.[] | select(.name|startswith("member-")) | .name')
-SCRIPT_DIR="$(dirname "$0")"
 
 echo -e "Members:\n$MEMBERS"
 
-# Ensure contexts and get hub name
+# Ensure all member contexts are available.
 for cluster in $MEMBERS; do
   echo "Fetching creds for $cluster..."
   az aks get-credentials -g "$RESOURCE_GROUP" -n "$cluster" --overwrite-existing
-  if [[ "$cluster" == *"$HUB_REGION"* ]]; then HUB_CLUSTER="$cluster"; fi
+done
+
+for cluster in $MEMBERS; do
+  if kubectl --context "$cluster" get clusterresourceplacement cert-manager-crp >/dev/null 2>&1; then
+    echo "Error: legacy cert-manager-crp exists on $cluster." >&2
+    echo "Migrate or remove that placement before using per-cluster Helm installs; mixed ownership is unsafe." >&2
+    exit 1
+  fi
 done
 
 helm repo add jetstack https://charts.jetstack.io 
 helm repo update 
 
-# Install cert manager on hub cluster
-echo -e "\nInstalling cert-manager on $HUB_CLUSTER..."
-kubectl config use-context "$HUB_CLUSTER" 
-helm upgrade --install cert-manager jetstack/cert-manager \
-  --namespace cert-manager \
-  --create-namespace \
-  --set crds.enabled=true 
-kubectl rollout status deployment/cert-manager -n cert-manager --timeout=240s || true
-echo "Pods ($HUB_CLUSTER):"
-kubectl get pods -n cert-manager -o wide || true
+for cluster in $MEMBERS; do
+  echo -e "\nInstalling cert-manager on $cluster..."
+  helm upgrade --install cert-manager jetstack/cert-manager \
+    --namespace cert-manager \
+    --create-namespace \
+    --set crds.enabled=true \
+    --kube-context "$cluster" \
+    --wait \
+    --timeout 5m
 
-# Create ClusterResourcePlacement to deploy cert-manager to all member clusters
-echo -e "\nCreating ClusterResourcePlacement for cert-manager..."
-kubectl apply -f "$SCRIPT_DIR/cert-manager-crp.yaml"
+  for crd in \
+    certificates.cert-manager.io \
+    certificaterequests.cert-manager.io \
+    clusterissuers.cert-manager.io \
+    issuers.cert-manager.io; do
+    kubectl --context "$cluster" wait --for=condition=Established \
+      "crd/$crd" --timeout=240s
+  done
 
-echo -e "\nChecking ClusterResourcePlacement status..."
-kubectl get clusterresourceplacement cert-manager-crp -o wide || true
+  for deployment in cert-manager cert-manager-cainjector cert-manager-webhook; do
+    kubectl --context "$cluster" rollout status \
+      "deployment/$deployment" -n cert-manager --timeout=240s
+  done
+done
 
-echo -e "\nDone. Cert-manager deployed to hub and will be propagated to all member clusters."
-echo "Monitor with: kubectl --context $HUB_CLUSTER get clusterresourceplacement cert-manager-crp -o wide"
+echo -e "\nDone. cert-manager is running independently on every member cluster."

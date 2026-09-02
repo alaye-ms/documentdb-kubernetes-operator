@@ -101,6 +101,45 @@ wait_for_service_endpoints() {
   return 1
 }
 
+ensure_cnpg_webhook_ca() {
+  local context="$1"
+  local ca_bundle
+
+  ca_bundle=$(kubectl --context "$context" get secret cnpg-ca-secret \
+    -n cnpg-system -o jsonpath='{.data.ca\.crt}' 2>/dev/null || true)
+  if [ -z "$ca_bundle" ]; then
+    echo "✗ CNPG CA Secret cnpg-system/cnpg-ca-secret is missing on $context"
+    return 1
+  fi
+
+  local resource patch
+  for resource in \
+    mutatingwebhookconfiguration/cnpg-mutating-webhook-configuration \
+    validatingwebhookconfiguration/cnpg-validating-webhook-configuration; do
+    if kubectl --context "$context" get "$resource" -o json | \
+      jq -e --arg ca "$ca_bundle" \
+        'all(.webhooks[]; .clientConfig.caBundle == $ca)' >/dev/null; then
+      continue
+    fi
+
+    echo "Repairing $resource with the local CNPG CA on $context..."
+    patch=$(kubectl --context "$context" get "$resource" -o json | \
+      jq --arg ca "$ca_bundle" \
+        '[.webhooks | to_entries[] | {op:"replace", path:("/webhooks/" + (.key|tostring) + "/clientConfig/caBundle"), value:$ca}]')
+    kubectl --context "$context" patch "$resource" --type=json -p "$patch"
+  done
+
+  for resource in \
+    mutatingwebhookconfiguration/cnpg-mutating-webhook-configuration \
+    validatingwebhookconfiguration/cnpg-validating-webhook-configuration; do
+    kubectl --context "$context" get "$resource" -o json | \
+      jq -e --arg ca "$ca_bundle" \
+        'all(.webhooks[]; .clientConfig.caBundle == $ca)' >/dev/null || return 1
+  done
+
+  echo "✓ CNPG webhook CA bundles are consistent on $context"
+}
+
 apply_with_webhook_retries() {
   local context="$1"
   local file_path="$2"
@@ -187,6 +226,12 @@ done
 
 echo ""
 echo "Selected primary cluster: $PRIMARY_CLUSTER"
+
+echo ""
+echo "Validating CNPG webhook certificates on all member clusters..."
+for cluster in "${CLUSTER_ARRAY[@]}"; do
+  ensure_cnpg_webhook_ca "$cluster"
+done
 
 # Build the cluster list YAML with proper indentation
 CLUSTER_LIST=""

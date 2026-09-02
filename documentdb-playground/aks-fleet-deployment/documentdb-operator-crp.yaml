@@ -121,3 +121,6 @@ spec:
                       - "true"
   strategy:
     type: RollingUpdate
+    applyStrategy:
+      comparisonOption: PartialComparison
+      whenToApply: IfNotDrifted
