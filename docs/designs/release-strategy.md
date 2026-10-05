@@ -106,6 +106,8 @@ The unreleased next major version is developed on `main`. Current and previous s
 
 For example, while `release/v1` is supported, `main` contains development for v2. A `release/v2` branch is created for the v2 release candidate. After v2 is released, `release/v1` remains supported during its three-month grace period.
 
+This is distinct from the release/vX.Y.Z branches, which are short-lived branches that exist to snapshot specific versions.
+
 ---
 
 ## Support Policy
