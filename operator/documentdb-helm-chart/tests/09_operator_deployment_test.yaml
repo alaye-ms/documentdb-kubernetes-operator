@@ -63,6 +63,189 @@ tests:
           value: "IfNotPresent"
 
   # -------------------------------------------------------------------
+  # Registry prefix (single-knob image bundle)
+  # -------------------------------------------------------------------
+  - it: should prefix the operator image with image.registry
+    set:
+      image.registry: mcr.microsoft.com
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "mcr.microsoft.com/documentdb/documentdb-kubernetes-operator/operator:0.3.0"
+
+  - it: should use a per-component full-ref repository verbatim, ignoring image.registry
+    set:
+      image.registry: mcr.microsoft.com
+      image.documentdbk8soperator.repository: myacr.azurecr.io/cp/operator
+      image.documentdbk8soperator.tag: v9
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "myacr.azurecr.io/cp/operator:v9"
+
+  - it: should treat a localhost:port repository as a full ref, ignoring image.registry
+    set:
+      image.registry: mcr.microsoft.com
+      image.documentdbk8soperator.repository: localhost:5000/cp/operator
+      image.documentdbk8soperator.tag: dev
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "localhost:5000/cp/operator:dev"
+
+  - it: should treat a localhost repository as a full ref, ignoring image.registry
+    set:
+      image.registry: mcr.microsoft.com
+      image.documentdbk8soperator.repository: localhost/cp/operator
+      image.documentdbk8soperator.tag: dev
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: "localhost/cp/operator:dev"
+
+  - it: should reject a repository that embeds a tag
+    set:
+      image.documentdbk8soperator.repository: myacr.io/cp/operator:custom
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be a host/path without a tag or digest"
+
+  - it: should reject a repository that embeds a digest
+    set:
+      image.documentdb.repository: myacr.io/documentdb@sha256:abc123
+    asserts:
+      - failedTemplate:
+          errorPattern: "must be a host/path without a tag or digest"
+
+  - it: should fail when image.registry is empty for a relative repository
+    set:
+      image.registry: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.registry is empty"
+
+  - it: should fail when a component repository is empty, naming the setting
+    set:
+      image.documentdbk8soperator.repository: ""
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.documentdbk8soperator.repository is empty"
+
+  - it: should reject an invalid gateway pull policy
+    set:
+      image.gateway.pullPolicy: Sometimes
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.gateway.pullPolicy must be one of Always, IfNotPresent, Never"
+
+  - it: should reject an invalid documentdb pull policy
+    set:
+      image.documentdb.pullPolicy: Sometimes
+    asserts:
+      - failedTemplate:
+          errorPattern: "image.documentdb.pullPolicy must be one of Always, IfNotPresent, Never"
+
+  - it: should accept a valid non-default gateway pull policy
+    set:
+      image.gateway.pullPolicy: Always
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GATEWAY_IMAGE_PULL_POLICY
+            value: "Always"
+
+  # -------------------------------------------------------------------
+  # Data-plane image repository env
+  # -------------------------------------------------------------------
+  - it: should set data-plane repo env using the default registry
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENTDB_EXTENSION_IMAGE_REPO
+            value: "ghcr.io/documentdb/documentdb-kubernetes-operator/documentdb"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GATEWAY_IMAGE_REPO
+            value: "ghcr.io/documentdb/documentdb-kubernetes-operator/gateway"
+
+  - it: should re-home data-plane repo env via image.registry
+    set:
+      image.registry: mcr.microsoft.com
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENTDB_EXTENSION_IMAGE_REPO
+            value: "mcr.microsoft.com/documentdb/documentdb-kubernetes-operator/documentdb"
+
+  - it: should omit otel/postgres env by default
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_COLLECTOR_IMAGE
+          any: true
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POSTGRES_IMAGE
+          any: true
+
+  - it: should set otel/postgres env as full mirrored refs when overridden
+    set:
+      image.registry: mcr.microsoft.com
+      image.otelCollector.repository: oss/otel/opentelemetry-collector-contrib
+      image.otelCollector.tag: "0.149.0"
+      image.postgres.repository: oss/cloudnative-pg/postgresql
+      image.postgres.tag: "17.6"
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: OTEL_COLLECTOR_IMAGE
+            value: "mcr.microsoft.com/oss/otel/opentelemetry-collector-contrib:0.149.0"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: POSTGRES_IMAGE
+            value: "mcr.microsoft.com/oss/cloudnative-pg/postgresql:17.6"
+
+  - it: should fail when otelCollector.repository is set without a tag
+    set:
+      image.otelCollector.repository: oss/otel/opentelemetry-collector-contrib
+      image.otelCollector.tag: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.otelCollector.repository is set but image.otelCollector.tag is empty; pin a tag (image.otelCollector.repository and image.otelCollector.tag must be set together)"
+
+  - it: should fail when otelCollector.tag is set without a repository
+    set:
+      image.otelCollector.repository: ""
+      image.otelCollector.tag: "0.149.0"
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.otelCollector.tag is set but image.otelCollector.repository is empty; set the repository (image.otelCollector.repository and image.otelCollector.tag must be set together)"
+
+  - it: should fail when postgres.repository is set without a tag
+    set:
+      image.postgres.repository: oss/cloudnative-pg/postgresql
+      image.postgres.tag: ""
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.postgres.repository is set but image.postgres.tag is empty; pin a tag (image.postgres.repository and image.postgres.tag must be set together)"
+
+  - it: should fail when postgres.tag is set without a repository
+    set:
+      image.postgres.repository: ""
+      image.postgres.tag: "17.6"
+    asserts:
+      - failedTemplate:
+          errorMessage: "image.postgres.tag is set but image.postgres.repository is empty; set the repository (image.postgres.repository and image.postgres.tag must be set together)"
+
+  # -------------------------------------------------------------------
   # Environment variables
   # -------------------------------------------------------------------
   - it: should set DOCUMENTDB_VERSION env when documentDbVersion is set
@@ -85,7 +268,7 @@ tests:
 
   - it: should set GATEWAY_IMAGE_PULL_POLICY when configured
     set:
-      gatewayImagePullPolicy: "Never"
+      image.gateway.pullPolicy: "Never"
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -94,6 +277,8 @@ tests:
             value: "Never"
 
   - it: should omit GATEWAY_IMAGE_PULL_POLICY when empty
+    set:
+      image.gateway.pullPolicy: ""
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
@@ -101,9 +286,17 @@ tests:
             name: GATEWAY_IMAGE_PULL_POLICY
           any: true
 
+  - it: should set GATEWAY_IMAGE_PULL_POLICY to IfNotPresent by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: GATEWAY_IMAGE_PULL_POLICY
+            value: "IfNotPresent"
+
   - it: should set DOCUMENTDB_IMAGE_PULL_POLICY when configured
     set:
-      documentDbImagePullPolicy: "IfNotPresent"
+      image.documentdb.pullPolicy: "IfNotPresent"
     asserts:
       - contains:
           path: spec.template.spec.containers[0].env
@@ -112,12 +305,22 @@ tests:
             value: "IfNotPresent"
 
   - it: should omit DOCUMENTDB_IMAGE_PULL_POLICY when empty
+    set:
+      image.documentdb.pullPolicy: ""
     asserts:
       - notContains:
           path: spec.template.spec.containers[0].env
           content:
             name: DOCUMENTDB_IMAGE_PULL_POLICY
           any: true
+
+  - it: should set DOCUMENTDB_IMAGE_PULL_POLICY to IfNotPresent by default
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: DOCUMENTDB_IMAGE_PULL_POLICY
+            value: "IfNotPresent"
 
   - it: should always set GATEWAY_PORT
     asserts:
