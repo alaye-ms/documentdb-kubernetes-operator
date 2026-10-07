@@ -1,0 +1,29 @@
+name: Documentation Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/operator-public-documentation/**'
+      - '.github/scripts/test_docs_*.py'
+      - '.github/workflows/test-docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/operator-public-documentation/**'
+      - '.github/scripts/test_docs_*.py'
+      - '.github/workflows/test-docs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  documentation-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Check gateway port-forward examples
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_docs_*.py' -v
