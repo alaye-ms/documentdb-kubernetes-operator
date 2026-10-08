@@ -76,6 +76,23 @@ var _ = Describe("DocumentDB TLS — PostgreSQL certificates",
 			}, timeouts.For(timeouts.DocumentDBReady), timeouts.PollInterval(timeouts.DocumentDBReady)).
 				Should(Succeed(), "CNPG Cluster must preserve spec.tls.postgres certificates")
 		})
+
+		It("preserves alternative DNS names when CNPG manages the server certificate", func(sctx SpecContext) {
+			ctx, cancel := context.WithTimeout(sctx, 10*time.Minute)
+			defer cancel()
+			env := e2e.SuiteEnv()
+			cluster := provisionCluster(ctx, env.Client, e2e.TLSLabel,
+				"tls_postgres_alt_dns_names", nil)
+			Eventually(func(g Gomega) {
+				backing := &cnpgv1.Cluster{}
+				g.Expect(env.Client.Get(ctx, types.NamespacedName{
+					Namespace: cluster.NamespaceName, Name: cluster.DD.Name,
+				}, backing)).To(Succeed())
+				g.Expect(backing.Spec.Certificates).NotTo(BeNil())
+				g.Expect(backing.Spec.Certificates.ServerAltDNSNames).To(Equal([]string{"postgres-extra.example.test"}))
+			}, timeouts.For(timeouts.DocumentDBReady), timeouts.PollInterval(timeouts.DocumentDBReady)).
+				Should(Succeed(), "CNPG rejects serverAltDNSNames with a provided serverTLSSecret; test the managed-server case")
+		})
 	},
 )
 
