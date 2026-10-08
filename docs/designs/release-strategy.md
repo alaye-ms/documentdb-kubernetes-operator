@@ -102,7 +102,7 @@ The unreleased next major version is developed on `main`. Current and previous s
 - Security fixes are backported to supported release branches.
 - Bug fixes are backported on a case-by-case basis.
 - New features and other minor changes remain on the current development line.
-- Releases are tagged `v<major>.<minor>.<patch>`; release candidates add an `-rc.N` suffix.
+- Releases are tagged `v<major>.<minor>.<patch>`; release candidates add an `-rcN` suffix.
 
 For example, while `release/v1` is supported, `main` contains development for v2. A `release/v2` branch is created for the v2 release candidate. After v2 is released, `release/v1` remains supported during its three-month grace period.
 
