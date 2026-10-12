@@ -254,7 +254,7 @@ tests:
           path: spec.template.spec.containers[0].env
           content:
             name: DOCUMENTDB_VERSION
-            value: "0.117.0"
+            value: "1.0-rc2-build-38421263548-1-b1f52b5"
 
   - it: should omit DOCUMENTDB_VERSION env when documentDbVersion is empty
     set:
