@@ -230,8 +230,8 @@ jobs:
       if: matrix.image.name == 'documentdb' && needs.resolve-public-artifacts.outputs.package_source == 'apt'
       env:
         PACKAGE: postgresql-${{ env.DOCUMENTDB_PG_MAJOR }}-documentdb
-        DEB_URL: ${{ fromJSON(needs.resolve-public-artifacts.outputs.extension_packages)[matrix.arch].url }}
-        DEB_SHA256: ${{ fromJSON(needs.resolve-public-artifacts.outputs.extension_packages)[matrix.arch].sha256 }}
+        DEB_URL: ${{ fromJSON(needs.resolve-public-artifacts.outputs.extension_packages || '{}')[matrix.arch].url }}
+        DEB_SHA256: ${{ fromJSON(needs.resolve-public-artifacts.outputs.extension_packages || '{}')[matrix.arch].sha256 }}
         DEB_VERSION: ${{ needs.resolve-public-artifacts.outputs.extension_deb_version }}
         EXPECTED_ARCH: ${{ matrix.arch }}
       shell: bash
