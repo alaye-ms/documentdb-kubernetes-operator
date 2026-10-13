@@ -44,6 +44,7 @@ jobs:
     outputs:
       mode: ${{ steps.probe.outputs.mode }}
       version: ${{ steps.probe.outputs.version }}
+      documentdb_ref: ${{ steps.probe.outputs.documentdb_ref }}
       ext_image_tag: ${{ steps.probe.outputs.ext_image_tag }}
     steps:
     - uses: actions/checkout@v4
@@ -52,6 +53,7 @@ jobs:
       shell: bash
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        DOCUMENTDB_GATEWAY_IMAGE_REPO: ghcr.io/documentdb/documentdb/documentdb-local
       run: |
         set -euo pipefail
         # If caller pinned a specific upstream documentdb_ref, always build from
@@ -60,12 +62,10 @@ jobs:
         VALUES_FILE="operator/documentdb-helm-chart/values.yaml"
         VERSION=$(grep -E '^documentDbVersion:' "$VALUES_FILE" \
           | sed -E 's/^documentDbVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
-        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::failed to parse documentDbVersion from $VALUES_FILE (got '$VERSION')"
-          exit 1
-        fi
+        RAW_VERSION="$VERSION" source .github/scripts/resolve-documentdb-version.sh > /dev/null
         EXT_TAG="${VERSION}-test-${{ github.run_id }}"
         echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "documentdb_ref=${SOURCE_RELEASE_TAG:-v${VERSION_DASH}}" >> "$GITHUB_OUTPUT"
         echo "ext_image_tag=$EXT_TAG" >> "$GITHUB_OUTPUT"
 
         if [[ -n "$INPUT_REF" ]]; then
@@ -107,7 +107,7 @@ jobs:
         fi
 
   # Compute the extension image tag downstream jobs use. In build mode this is
-  # derived from the compiled deb filename (source of truth); in registry mode
+  # derived from the compiled deb metadata (source of truth); in registry mode
   # it is the chart's documentDbVersion plus the test run-id suffix.
   read-extension-version:
     name: Read Extension Version
@@ -120,6 +120,8 @@ jobs:
     outputs:
       ext_image_tag: ${{ steps.read.outputs.ext_image_tag }}
     steps:
+    - uses: actions/checkout@v4
+      if: needs.probe-images.outputs.mode == 'build'
     - name: Download packages (amd64)
       if: needs.probe-images.outputs.mode == 'build'
       uses: actions/download-artifact@v4
@@ -128,6 +130,8 @@ jobs:
         path: packages/
     - name: Compute extension image tag
       id: read
+      env:
+        DOCUMENTDB_GATEWAY_IMAGE_REPO: ghcr.io/documentdb/documentdb/documentdb-local
       run: |
         set -euo pipefail
         if [[ "${{ needs.probe-images.outputs.mode }}" == "registry" ]]; then
@@ -136,13 +140,12 @@ jobs:
         else
           DEB_FILE=$(ls packages/ | grep -E 'postgresql.*documentdb.*\.deb' | grep -v dbgsym | head -1)
           echo "Found deb: $DEB_FILE"
-          # deb filename format: deb13-postgresql-18-documentdb_0.111-0_amd64.deb
-          # Extract version: strip prefix up to 'documentdb_', then take chars before '_<arch>'
-          EXT_VER=$(echo "$DEB_FILE" | sed -n 's/.*documentdb_\([0-9]*\.[0-9]*\)-[0-9]*_.*/\1.0/p')
-          if [[ -z "$EXT_VER" ]]; then
-            echo "::error::Could not extract version from deb filename: $DEB_FILE"
-            exit 1
+          DEB_VERSION=$(dpkg-deb --field "packages/$DEB_FILE" Version)
+          if [[ "$DEB_VERSION" == *~* ]]; then
+            DEB_VERSION="${DEB_VERSION%%-*}"
           fi
+          RAW_VERSION="$DEB_VERSION" source .github/scripts/resolve-documentdb-version.sh > /dev/null
+          EXT_VER="$VERSION"
           EXT_TAG="${EXT_VER}-test-${{ github.run_id }}"
           echo "Build mode: extension version=$EXT_VER → image tag: $EXT_TAG"
         fi
@@ -257,14 +260,9 @@ jobs:
     env:
       DOCUMENTDB_REPO: documentdb/documentdb
     steps:
-    - name: Checkout operator repo (read chart documentDbVersion)
-      uses: actions/checkout@v4
-      with:
-        path: operator-checkout
-
     - name: Determine DocumentDB ref
       # Pin the documentdb source build to the chart's default documentDbVersion
-      # (formatted as the upstream tag, e.g. 0.109.0 -> v0.109-0). This keeps the
+      # (upstream tags: 0.109.0 -> v0.109-0, 1.0-RC2 -> v1.0-RC2). This keeps the
       # CI build in lock-step with the version the operator chart actually ships,
       # and avoids picking up unstable upstream main where regression tests can
       # flip success/fail per SHA. Callers can still override via the
@@ -278,15 +276,8 @@ jobs:
           REF="$INPUT_REF"
           echo "Using caller-provided documentdb_ref: $REF"
         else
-          VALUES_FILE="operator-checkout/operator/documentdb-helm-chart/values.yaml"
-          VERSION=$(grep -E '^documentDbVersion:' "$VALUES_FILE" \
-            | sed -E 's/^documentDbVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "ERROR: failed to parse documentDbVersion from $VALUES_FILE (got '$VERSION')" >&2
-            exit 1
-          fi
-          REF="v${VERSION%.*}-${VERSION##*.}"
-          echo "Derived documentdb ref from chart documentDbVersion=$VERSION -> $REF"
+          REF="${{ needs.probe-images.outputs.documentdb_ref }}"
+          echo "Using documentdb ref resolved from chart: $REF"
         fi
         echo "ref=$REF" >> "$GITHUB_OUTPUT"
 
