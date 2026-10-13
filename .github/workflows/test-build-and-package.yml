@@ -60,12 +60,12 @@ jobs:
         # source (the registry images may not match the requested ref).
         INPUT_REF="${{ inputs.documentdb_ref }}"
         VALUES_FILE="operator/documentdb-helm-chart/values.yaml"
-        VERSION=$(grep -E '^documentDbVersion:' "$VALUES_FILE" \
+        REGISTRY_VERSION=$(grep -E '^documentDbVersion:' "$VALUES_FILE" \
           | sed -E 's/^documentDbVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
-        RAW_VERSION="$VERSION" source .github/scripts/resolve-documentdb-version.sh > /dev/null
-        EXT_TAG="${VERSION}-test-${{ github.run_id }}"
+        RAW_VERSION="$REGISTRY_VERSION" source .github/scripts/resolve-documentdb-version.sh > /dev/null
+        EXT_TAG="${REGISTRY_VERSION}-test-${{ github.run_id }}"
         {
-          echo "version=$VERSION"
+          echo "version=$REGISTRY_VERSION"
           echo "documentdb_ref=${SOURCE_RELEASE_TAG:-v${VERSION_DASH}}"
           echo "ext_image_tag=$EXT_TAG"
         } >> "$GITHUB_OUTPUT"
@@ -87,18 +87,18 @@ jobs:
           local count
           # Try org endpoint first, fall back to user endpoint.
           count=$(gh api "/orgs/${OWNER}/packages/container/${pkg}/versions" \
-              --jq "[.[] | select(.metadata.container.tags[]? == \"${VERSION}\")] | length" 2>/dev/null) \
+              --jq "[.[] | select(.metadata.container.tags[]? == \"${REGISTRY_VERSION}\")] | length" 2>/dev/null) \
             || count=$(gh api "/users/${OWNER}/packages/container/${pkg}/versions" \
-              --jq "[.[] | select(.metadata.container.tags[]? == \"${VERSION}\")] | length" 2>/dev/null) \
+              --jq "[.[] | select(.metadata.container.tags[]? == \"${REGISTRY_VERSION}\")] | length" 2>/dev/null) \
             || count=0
           [[ "${count:-0}" -gt 0 ]]
         }
 
         DOC_OK=0; GW_OK=0
-        echo "Probing ghcr.io/${OWNER}/documentdb-kubernetes-operator/documentdb:${VERSION}..."
-        if probe_image documentdb; then DOC_OK=1; echo "  ✓ documentdb:${VERSION} present"; else echo "  ✗ documentdb:${VERSION} missing"; fi
-        echo "Probing ghcr.io/${OWNER}/documentdb-kubernetes-operator/gateway:${VERSION}..."
-        if probe_image gateway; then GW_OK=1; echo "  ✓ gateway:${VERSION} present"; else echo "  ✗ gateway:${VERSION} missing"; fi
+        echo "Probing ghcr.io/${OWNER}/documentdb-kubernetes-operator/documentdb:${REGISTRY_VERSION}..."
+        if probe_image documentdb; then DOC_OK=1; echo "  ✓ documentdb:${REGISTRY_VERSION} present"; else echo "  ✗ documentdb:${REGISTRY_VERSION} missing"; fi
+        echo "Probing ghcr.io/${OWNER}/documentdb-kubernetes-operator/gateway:${REGISTRY_VERSION}..."
+        if probe_image gateway; then GW_OK=1; echo "  ✓ gateway:${REGISTRY_VERSION} present"; else echo "  ✗ gateway:${REGISTRY_VERSION} missing"; fi
 
         if [[ $DOC_OK -eq 1 && $GW_OK -eq 1 ]]; then
           echo "Both images present → registry mode (skip source build)."
