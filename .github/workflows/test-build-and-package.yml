@@ -64,9 +64,11 @@ jobs:
           | sed -E 's/^documentDbVersion:[[:space:]]*"?([^"[:space:]]+)"?.*/\1/')
         RAW_VERSION="$VERSION" source .github/scripts/resolve-documentdb-version.sh > /dev/null
         EXT_TAG="${VERSION}-test-${{ github.run_id }}"
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "documentdb_ref=${SOURCE_RELEASE_TAG:-v${VERSION_DASH}}" >> "$GITHUB_OUTPUT"
-        echo "ext_image_tag=$EXT_TAG" >> "$GITHUB_OUTPUT"
+        {
+          echo "version=$VERSION"
+          echo "documentdb_ref=${SOURCE_RELEASE_TAG:-v${VERSION_DASH}}"
+          echo "ext_image_tag=$EXT_TAG"
+        } >> "$GITHUB_OUTPUT"
 
         if [[ -n "$INPUT_REF" ]]; then
           echo "Caller pinned documentdb_ref=$INPUT_REF → forcing build mode."
