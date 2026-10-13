@@ -140,7 +140,16 @@ jobs:
           EXT_TAG="${{ needs.probe-images.outputs.ext_image_tag }}"
           echo "Registry mode: ext_image_tag=$EXT_TAG (from chart documentDbVersion)"
         else
-          DEB_FILE=$(ls packages/ | grep -E 'postgresql.*documentdb.*\.deb' | grep -v dbgsym | head -1)
+          DEB_FILE=""
+          for package in packages/*postgresql*documentdb*.deb; do
+            [[ -f "$package" && "$package" != *dbgsym* ]] || continue
+            DEB_FILE="${package##*/}"
+            break
+          done
+          if [[ -z "$DEB_FILE" ]]; then
+            echo "::error::No DocumentDB extension .deb found in packages/"
+            exit 1
+          fi
           echo "Found deb: $DEB_FILE"
           DEB_VERSION=$(dpkg-deb --field "packages/$DEB_FILE" Version)
           if [[ "$DEB_VERSION" == *~* ]]; then
@@ -382,7 +391,12 @@ jobs:
           echo "✓ documentdb image retagged from registry: $TARGET"
         else
           echo "Build mode: building documentdb Docker image for ${{ matrix.arch }}..."
-          DEB_FILE=$(ls packages/ | grep -E 'postgresql.*documentdb.*\.deb' | grep -v dbgsym | head -1)
+          DEB_FILE=""
+          for package in packages/*postgresql*documentdb*.deb; do
+            [[ -f "$package" && "$package" != *dbgsym* ]] || continue
+            DEB_FILE="${package##*/}"
+            break
+          done
           if [[ -z "$DEB_FILE" ]]; then
             echo "::error::No DocumentDB extension .deb found in packages/"
             ls -la packages/ >&2
@@ -392,7 +406,7 @@ jobs:
           docker buildx build \
             --platform linux/${{ matrix.arch }} \
             --build-arg PG_MAJOR=18 \
-            --build-arg DEB_PACKAGE_REL_PATH=packages/$DEB_FILE \
+            --build-arg "DEB_PACKAGE_REL_PATH=packages/$DEB_FILE" \
             --tag "$TARGET" \
             --load \
             -f .github/dockerfiles/Dockerfile_extension .
@@ -483,7 +497,12 @@ jobs:
           echo "✓ gateway image retagged from registry: $TARGET"
         else
           echo "Build mode: building gateway Docker image for ${{ matrix.arch }}..."
-          GW_DEB=$(ls gateway-context/packages/ | grep -E 'gateway.*\.deb' | head -1)
+          GW_DEB=""
+          for package in gateway-context/packages/*gateway*.deb; do
+            [[ -f "$package" ]] || continue
+            GW_DEB="${package##*/}"
+            break
+          done
           if [[ -z "$GW_DEB" ]]; then
             echo "::error::No gateway .deb found in gateway-context/packages/"
             ls -la gateway-context/packages/ >&2
@@ -492,7 +511,7 @@ jobs:
           echo "Using deb: $GW_DEB"
           docker buildx build \
             --platform linux/${{ matrix.arch }} \
-            --build-arg GATEWAY_DEB_REL_PATH=packages/$GW_DEB \
+            --build-arg "GATEWAY_DEB_REL_PATH=packages/$GW_DEB" \
             --tag "$TARGET" \
             --load \
             -f .github/dockerfiles/Dockerfile_gateway_deb gateway-context
