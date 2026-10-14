@@ -15,6 +15,11 @@ on:
         description: 'Release version for operator images and Helm chart'
         required: true
         default: '0.2.0'
+      release_candidate:
+        description: 'Release Candidate: publish an explicit opt-in prerelease, leaving default stable installs unchanged'
+        required: false
+        default: false
+        type: boolean
       source_ref:
         description: 'Git ref to package the Helm chart from (tag or commit recommended to avoid drift)'
         required: true
@@ -50,6 +55,22 @@ jobs:
       actions: read
       checks: read
     steps:
+      - name: Validate release version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+        run: |
+          stable_pattern='(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+          if [[ "$RELEASE_CANDIDATE" == 'true' ]]; then
+            if [[ ! "$RELEASE_VERSION" =~ ^${stable_pattern}-rc(0|[1-9][0-9]*)$ ]]; then
+              echo '::error::Release Candidate requires a version such as 0.3.0-rc1.'
+              exit 1
+            fi
+          elif [[ ! "$RELEASE_VERSION" =~ ^${stable_pattern}$ ]]; then
+            echo '::error::Stable releases require a version such as 0.3.0. For RC versions, enable Release Candidate.'
+            exit 1
+          fi
+
       - name: Checkout (script only)
         uses: actions/checkout@v4
         with:
@@ -116,9 +137,11 @@ jobs:
         uses: azure/setup-helm@v4
 
       - name: Set chart version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
         run: |
-            echo "CHART_VERSION=${{ inputs.version }}" >> $GITHUB_ENV
-            echo "Using chart version: ${{ inputs.version }}"
+          echo "CHART_VERSION=$RELEASE_VERSION" >> "$GITHUB_ENV"
+          echo "Using chart version: $RELEASE_VERSION"
 
       - name: Update Chart.yaml metadata
         run: |
@@ -151,9 +174,17 @@ jobs:
           helm push "$CHART_FILE" oci://${GHCR_REPO}
 
       - name: Release summary
+        env:
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           echo "## Operator Release Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "$RELEASE_CANDIDATE" == 'true' ]]; then
+            echo '- **Release Type**: Release Candidate (opt-in; default stable chart and image tag unchanged)' >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Install RC**: \`helm install documentdb-operator oci://${GHCR_REPO}/documentdb-operator --version ${CHART_VERSION} --namespace documentdb-operator --create-namespace --wait\`" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '- **Release Type**: Stable' >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo "- **Operator Version**: \`$CHART_VERSION\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Images Promoted**: operator, sidecar" >> $GITHUB_STEP_SUMMARY
           echo "- **Source Tag**: \`${{ inputs.candidate_version }}\` → \`${{ inputs.version }}\`" >> $GITHUB_STEP_SUMMARY

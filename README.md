@@ -32,6 +32,12 @@ helm install documentdb-operator oci://ghcr.io/documentdb/documentdb-operator \
 
 For production or repeatable installs, pick a release from [GitHub Releases](https://github.com/documentdb/documentdb-kubernetes-operator/releases) and add `--version <release-version>` to the command. OCI registries do not support `helm search repo`.
 
+Release candidates are published as official images and prerelease charts
+(for example, `0.3.0-rc1`). They are excluded from default stable installs.
+To opt in, add `--version <rc-version>` to the install command. When publishing
+an RC with the operator release workflow, enable **Release Candidate** and
+use a version in the form `X.Y.Z-rcN`.
+
 Requires Helm 3.8+ (OCI support is on by default). For the full prerequisites (cert-manager, supported Kubernetes versions, container runtimes) and platform-specific setup, see the [installation guide](https://documentdb.io/documentdb-kubernetes-operator/latest/preview/getting-started/).
 
 ## 🚀 Quick Start
